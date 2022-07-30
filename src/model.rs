@@ -14,7 +14,7 @@ pub struct Model {
 //https://blog.logrocket.com/fundamentals-for-using-structs-in-rust/
 
 impl Model {
-    pub fn from_file(filename: &str) -> Result<(Self)> {
+    pub fn from_file(filename: &str) -> Result<Self> {
         let mut model = Model {
             nfaces: 0,
             nverts: 0,
@@ -27,11 +27,13 @@ impl Model {
       
         for line in buf_reader.lines() {
             let l = line?;
-            match l.chars().next() {
-                Some('v') => Model::add_vertex_from_line(&mut model, &l),
-                Some('f') => Model::add_face_from_line(&mut model, &l),
-                Some(_) => println!("Other"),
-                None => println!("Empty")
+            if l.len() == 0 {
+                continue;
+            }
+            match &l[..2] {
+                "v " => Model::add_vertex_from_line(&mut model, &l),
+                "f " => Model::add_face_from_line(&mut model, &l),
+                _ => (), // There are vt and vn lines that we are not interested in yet
             }
         }
         assert_eq!(model.verts.len() as i32, model.nverts);
