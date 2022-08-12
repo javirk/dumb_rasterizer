@@ -1,17 +1,17 @@
 use std::fs::File;
 use std::env;
 use std::io::{BufReader, prelude::*, Error};
+use nalgebra::{SVector, Vector3};
 
 type Result<T> = std::result::Result<T, Error>;
 
+// TODO: re-implement Vec to have always three components and with names x, y, z
 pub struct Model {
     pub nfaces: i32,
     pub nverts: i32,
     pub faces: Vec<Vec<i32>>,
-    pub verts: Vec<Vec<f32>>
+    pub verts: Vec<SVector<f32, 3>>
 }
-
-//https://blog.logrocket.com/fundamentals-for-using-structs-in-rust/
 
 impl Model {
     pub fn from_file(filename: &str) -> Result<Self> {
@@ -49,6 +49,9 @@ impl Model {
                 true => ()
             }
         }
+
+        let vertex = Vector3::new(vertex[0], vertex[1], vertex[2]);
+
         self.verts.push(vertex);
         self.nverts += 1;  // I don't know if I like this here, it's maybe too many memory access
     }
