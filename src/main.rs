@@ -2,7 +2,6 @@ use image::{imageops, Rgb, RgbImage, Pixel};
 use std::{mem};
 mod model;
 mod rgb;
-use rgb::RgbExt;
 use nalgebra::{SVector, Vector2, Vector3};
 
 const WIDTH: f32 = 800.0;
@@ -71,9 +70,12 @@ fn triangle(
     pts: Vec<SVector<f32, 3>>,
     zbuffer: &mut Vec<f32>,
     image: &mut RgbImage,
-    vertices_colors: &mut Vec<RgbExt<f32>>,
+    texture: &RgbImage,
+    vertices_texture_coords: Vec<SVector<f32, 3>>,
+    intensity: f32
 ) {
     let (imwidth, imheight) = (image.width() as f32, image.height() as f32);
+    let (texwidth, texheight) = (texture.width() as f32, texture.height() as f32);
 
     let mut bboxmin: SVector<f32, 2> = Vector2::new(std::f32::MAX, std::f32::MAX);
     let mut bboxmax: SVector<f32, 2> = Vector2::new(-std::f32::MAX, -std::f32::MAX);
@@ -87,9 +89,10 @@ fn triangle(
     }
 
     let mut P: SVector<f32, 3> = Vector3::new(bboxmin.x, bboxmin.y, 0.);
-    let mut color: RgbExt<f32>;
+    let mut texture_coords: SVector<f32, 3>;
     let mut den_color: f32;
     let mut color_rgb8: Rgb<u8>;
+    let mut pixel_color: Rgb<u8>;
 
     while P.x <= bboxmax.x {
         P.y = bboxmin.y;
@@ -108,17 +111,16 @@ fn triangle(
             if zbuffer[(P.x + P.y * imwidth) as usize] < P.z {
                 zbuffer[(P.x + P.y * imwidth) as usize] = P.z;
 
-                den_color = bc_screen.x + bc_screen.y + bc_screen.z;
-                
-                color = (vertices_colors[0]*bc_screen.x + vertices_colors[1]*bc_screen.y + vertices_colors[2]*bc_screen.z) / den_color;
-                // TODO: Implement this as an extension to the trait. I don't know how to do it yet. RgbExt<f32> -> Rgb<u8>
-                color_rgb8 = Rgb([
-                    (color.0[0]*255.) as u8, 
-                    (color.0[1]*255.) as u8, 
-                    (color.0[2]*255.) as u8
-                    ]); 
+                texture_coords = vertices_texture_coords[0]*bc_screen.x + vertices_texture_coords[1]*bc_screen.y + vertices_texture_coords[2]*bc_screen.z;
+
+                pixel_color = texture.get_pixel((texture_coords[0] * texwidth) as u32, ((1. - texture_coords[1])*texheight) as u32).to_rgb();
+                pixel_color = Rgb([
+                    ((pixel_color.0[0] as f32) * intensity) as u8,
+                    ((pixel_color.0[1] as f32) * intensity) as u8,
+                    ((pixel_color.0[2] as f32) * intensity) as u8,
+                ]);
                     
-                image.put_pixel(P.x as u32, P.y as u32, color_rgb8)
+                image.put_pixel(P.x as u32, P.y as u32, pixel_color)
             }
             P.y += 1.;
         }
@@ -148,9 +150,7 @@ fn main() {
         }
     };
 
-    let texture = image::open("./obj/african_head_diffuse.tga").unwrap().into_rgba32f();
-
-    let mut intensity_color: u8 = 0;
+    let texture = image::open("./obj/african_head_diffuse.tga").unwrap().to_rgb8();
 
     // Declare variables to use later
     let mut face: &Vec<i32> = &Vec::new();
@@ -158,31 +158,24 @@ fn main() {
     let mut intensity: f32 = 0.;
     let mut v: SVector<f32, 3>;
     let mut n: SVector<f32, 3>;
-    let mut vertex_color: Rgb<f32>;
+    let mut t: SVector<f32, 3>;
 
     // Render
     for i in 0..model.nfaces as usize {
-        face = &model.faces[i];
         face_texture = &model.faces_texture_coords[i];
+        face = &model.faces[i];
+        
         let mut screen_coords: Vec<SVector<f32, 3>> = Vec::new();  // Is it bad to use let inside a for loop? @TODO: Investigate
         let mut world_coords: Vec<SVector<f32, 3>> = Vec::new();
         let mut texture_coords: Vec<SVector<f32, 3>> = Vec::new();
-        let mut vertices_colors: Vec<RgbExt<f32>> = Vec::new();
 
         for j in 0..3 as usize {
             v = model.verts[face[j] as usize];
-            texture_coords.push(model.verts_texture[face_texture[j] as usize]);
+            t = model.verts_texture[face_texture[j] as usize];
+
+            texture_coords.push(t);
             screen_coords.push(world2screen(v));
             world_coords.push(v);
-        }
-        
-        // There has to be a better way to do this. 
-        for j in 0..3 as usize {
-            texture_coords[j][0] = texture_coords[j][0] * (texture.dimensions().0 as f32);
-            texture_coords[j][1] = texture_coords[j][1] * (texture.dimensions().1 as f32);
-
-            vertex_color = texture.get_pixel(texture_coords[j][0] as u32, texture_coords[j][1] as u32).to_rgb();
-            vertices_colors.push(RgbExt(vertex_color))
         }
 
         n = (world_coords[2] - world_coords[0]).cross(&(world_coords[1] - world_coords[0]));
@@ -191,12 +184,13 @@ fn main() {
         intensity = n.dot(&light_dir);
 
         if intensity > 0. {
-            intensity_color = (intensity * 255.) as u8;
             triangle(
                 screen_coords,
                 &mut zbuffer,
                 &mut imgbuf,
-                &mut vertices_colors
+                &texture,
+                texture_coords,
+                intensity
             );
         }
     }
@@ -206,30 +200,39 @@ fn main() {
 }
 
 
-fn main_test() {
-    let mut zbuffer: Vec<f32> = vec![-std::f32::MAX; (WIDTH * HEIGHT) as usize];
+// fn main_test() {
+//     let mut zbuffer: Vec<f32> = vec![-std::f32::MAX; (WIDTH * HEIGHT) as usize];
 
-    let mut imgbuf: RgbImage = image::ImageBuffer::new(WIDTH as u32, HEIGHT as u32);
+//     let mut imgbuf: RgbImage = image::ImageBuffer::new(WIDTH as u32, HEIGHT as u32);
+//     let model = match model::Model::from_file("./obj/triangle.obj") {
+//         Ok(m) => m,
+//         Err(e) => {
+//             println!("Error {}", e.to_string());
+//             std::process::exit(1)
+//         }
+//     };
+//     let texture = image::open("./obj/easy_texture.png").unwrap().to_rgb8();
 
-    let screen_coords: Vec<SVector<f32, 3>> = vec![
-        Vector3::new(45., 45., 0.),
-        Vector3::new(256., 467., 0.),
-        Vector3::new(467., 45., 0.),
-    ];
+//     let screen_coords: Vec<SVector<f32, 3>> = vec![
+//         Vector3::new(45., 45., 0.),
+//         Vector3::new(256., 467., 0.),
+//         Vector3::new(467., 45., 0.),
+//     ];
 
-    let mut vertices_colors: Vec<RgbExt<f32>> = vec![
-        RgbExt(Rgb([1., 0., 0.])),
-        RgbExt(Rgb([0., 1., 0.])),
-        RgbExt(Rgb([0., 0., 1.])),
-    ];
+//     let mut vertices_colors: Vec<RgbExt<f32>> = vec![
+//         RgbExt(Rgb([1., 0., 0.])),
+//         RgbExt(Rgb([0., 1., 0.])),
+//         RgbExt(Rgb([0., 0., 1.])),
+//     ];
 
-    triangle(
-        screen_coords,
-        &mut zbuffer,
-        &mut imgbuf,
-        &mut vertices_colors
-    );
+//     triangle(
+//         screen_coords,
+//         &mut zbuffer,
+//         &mut imgbuf,
+//         &texture,
 
-    imgbuf = imageops::flip_vertical(&imgbuf);
-    imgbuf.save("test.png").unwrap();
-}
+//     );
+
+//     imgbuf = imageops::flip_vertical(&imgbuf);
+//     imgbuf.save("test.png").unwrap();
+// }
