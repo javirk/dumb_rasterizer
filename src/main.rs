@@ -1,8 +1,9 @@
-use image::{imageops, Rgb, RgbImage, Pixel};
-use std::{mem};
+use image::{imageops, Pixel, Rgb, RgbImage};
+use std::mem;
+mod camera;
 mod model;
 mod rgb;
-use nalgebra::{SVector, Vector2, Vector3};
+use nalgebra::{SVector, SMatrix, Vector2, Vector3};
 
 const WIDTH: f32 = 800.0;
 const HEIGHT: f32 = 800.;
@@ -20,7 +21,6 @@ fn barycentric(pts: &Vec<SVector<f32, 3>>, P: SVector<f32, 3>) -> SVector<f32, 3
     );
 
     let u = v1.cross(&v2);
-    //println!("{} {} {}", u.x, u.y, u.z);
 
     /* `pts` and `P` has integer value as coordinates
     so `abs(u[2])` < 1 means `u[2]` is 0, that means
@@ -72,7 +72,7 @@ fn triangle(
     image: &mut RgbImage,
     texture: &RgbImage,
     vertices_texture_coords: Vec<SVector<f32, 3>>,
-    intensity: f32
+    intensity: f32,
 ) {
     let (imwidth, imheight) = (image.width() as f32, image.height() as f32);
     let (texwidth, texheight) = (texture.width() as f32, texture.height() as f32);
@@ -111,15 +111,22 @@ fn triangle(
             if zbuffer[(P.x + P.y * imwidth) as usize] < P.z {
                 zbuffer[(P.x + P.y * imwidth) as usize] = P.z;
 
-                texture_coords = vertices_texture_coords[0]*bc_screen.x + vertices_texture_coords[1]*bc_screen.y + vertices_texture_coords[2]*bc_screen.z;
+                texture_coords = vertices_texture_coords[0] * bc_screen.x
+                    + vertices_texture_coords[1] * bc_screen.y
+                    + vertices_texture_coords[2] * bc_screen.z;
 
-                pixel_color = texture.get_pixel((texture_coords[0] * texwidth) as u32, ((1. - texture_coords[1])*texheight) as u32).to_rgb();
+                pixel_color = texture
+                    .get_pixel(
+                        (texture_coords[0] * texwidth) as u32,
+                        ((1. - texture_coords[1]) * texheight) as u32,
+                    )
+                    .to_rgb();
                 pixel_color = Rgb([
                     ((pixel_color.0[0] as f32) * intensity) as u8,
                     ((pixel_color.0[1] as f32) * intensity) as u8,
                     ((pixel_color.0[2] as f32) * intensity) as u8,
                 ]);
-                    
+
                 image.put_pixel(P.x as u32, P.y as u32, pixel_color)
             }
             P.y += 1.;
@@ -132,13 +139,16 @@ fn world2screen(v: SVector<f32, 3>) -> SVector<f32, 3> {
     return Vector3::new(
         ((v.x + 1.) * WIDTH / 2. + 0.5).floor(),
         ((v.y + 1.) * HEIGHT / 2. + 0.5).floor(),
-        v.z
+        v.z,
     );
 }
 
 fn main() {
     let mut zbuffer: Vec<f32> = vec![-std::f32::MAX; (WIDTH * HEIGHT) as usize];
     let light_dir: SVector<f32, 3> = Vector3::new(0., 0., -1.);
+    let eye: SVector<f32, 3> = Vector3::new(1., 1., 3.);
+    let center: SVector<f32, 3> = Vector3::new(0., 0., 0.);
+    let up: SVector<f32, 3> = Vector3::new(0., 1., 0.);
 
     let mut imgbuf: RgbImage = image::ImageBuffer::new(WIDTH as u32, HEIGHT as u32);
 
@@ -150,7 +160,9 @@ fn main() {
         }
     };
 
-    let texture = image::open("./obj/african_head_diffuse.tga").unwrap().to_rgb8();
+    let texture = image::open("./obj/african_head_diffuse.tga")
+        .unwrap()
+        .to_rgb8();
 
     // Declare variables to use later
     let mut face: &Vec<i32> = &Vec::new();
@@ -160,12 +172,17 @@ fn main() {
     let mut n: SVector<f32, 3>;
     let mut t: SVector<f32, 3>;
 
+    let mut projection: SMatrix<f32, 4, 4> = SMatrix::identity();
+    let modelview = camera::lookat(eye, center, up);
+    projection[(3, 2)] = -1. / (eye - center).z;
+    let viewport = camera::viewport(WIDTH / 8., HEIGHT / 8., WIDTH * 3./4., HEIGHT* 3./4.);
+
     // Render
     for i in 0..model.nfaces as usize {
         face_texture = &model.faces_texture_coords[i];
         face = &model.faces[i];
-        
-        let mut screen_coords: Vec<SVector<f32, 3>> = Vec::new();  // Is it bad to use let inside a for loop? @TODO: Investigate
+
+        let mut screen_coords: Vec<SVector<f32, 3>> = Vec::new(); // Is it bad to use let inside a for loop? @TODO: Investigate
         let mut world_coords: Vec<SVector<f32, 3>> = Vec::new();
         let mut texture_coords: Vec<SVector<f32, 3>> = Vec::new();
 
@@ -174,7 +191,10 @@ fn main() {
             t = model.verts_texture[face_texture[j] as usize];
 
             texture_coords.push(t);
-            screen_coords.push(world2screen(v));
+            // screen_coords.push(world2screen(v));
+            screen_coords.push(
+                camera::m2v(viewport * projection * modelview * camera::v2m(v))
+            );
             world_coords.push(v);
         }
 
@@ -190,7 +210,7 @@ fn main() {
                 &mut imgbuf,
                 &texture,
                 texture_coords,
-                intensity
+                intensity,
             );
         }
     }
@@ -198,41 +218,3 @@ fn main() {
     imgbuf = imageops::flip_vertical(&imgbuf);
     imgbuf.save("test.png").unwrap();
 }
-
-
-// fn main_test() {
-//     let mut zbuffer: Vec<f32> = vec![-std::f32::MAX; (WIDTH * HEIGHT) as usize];
-
-//     let mut imgbuf: RgbImage = image::ImageBuffer::new(WIDTH as u32, HEIGHT as u32);
-//     let model = match model::Model::from_file("./obj/triangle.obj") {
-//         Ok(m) => m,
-//         Err(e) => {
-//             println!("Error {}", e.to_string());
-//             std::process::exit(1)
-//         }
-//     };
-//     let texture = image::open("./obj/easy_texture.png").unwrap().to_rgb8();
-
-//     let screen_coords: Vec<SVector<f32, 3>> = vec![
-//         Vector3::new(45., 45., 0.),
-//         Vector3::new(256., 467., 0.),
-//         Vector3::new(467., 45., 0.),
-//     ];
-
-//     let mut vertices_colors: Vec<RgbExt<f32>> = vec![
-//         RgbExt(Rgb([1., 0., 0.])),
-//         RgbExt(Rgb([0., 1., 0.])),
-//         RgbExt(Rgb([0., 0., 1.])),
-//     ];
-
-//     triangle(
-//         screen_coords,
-//         &mut zbuffer,
-//         &mut imgbuf,
-//         &texture,
-
-//     );
-
-//     imgbuf = imageops::flip_vertical(&imgbuf);
-//     imgbuf.save("test.png").unwrap();
-// }
