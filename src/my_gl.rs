@@ -1,5 +1,6 @@
 use nalgebra::{Matrix4x1, SVector, SMatrix, Vector2, Vector3};
 use image::{Pixel, Rgb, RgbImage};
+use crate::shaders::IShader;
 
 const DEPTH: f32 = 255.;
 
@@ -75,11 +76,9 @@ fn barycentric(pts: &Vec<SVector<f32, 3>>, p: SVector<f32, 3>) -> SVector<f32, 3
 
 pub fn triangle(
     pts: Vec<SVector<f32, 3>>,
+    shader: Box<dyn IShader>,
     zbuffer: &mut Vec<f32>,
     image: &mut RgbImage,
-    texture: &RgbImage,
-    vertices_texture_coords: Vec<SVector<f32, 3>>,
-    intensity: f32,
 ) {
     let (imwidth, imheight) = (image.width() as f32, image.height() as f32);
     let (texwidth, texheight) = (texture.width() as f32, texture.height() as f32);

@@ -51,7 +51,7 @@ fn main() {
         let mut screen_coords: Vec<SVector<f32, 3>> = Vec::new(); // Is it bad to use let inside a for loop? @TODO: Investigate
         //let mut world_coords: Vec<SVector<f32, 3>> = Vec::new();
         let mut texture_coords: Vec<SVector<f32, 3>> = Vec::new();
-        let shader = shaders::GouraudShader.init();
+        let shader: shaders::GouraudShader = shaders::IShader::init();
 
         for j in 0..3 as usize {
             v = model.verts[face[j] as usize];
