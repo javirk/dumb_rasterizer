@@ -1,5 +1,5 @@
-use nalgebra::{Matrix4x1, SVector, SMatrix, Vector2, Vector3};
-use image::{Pixel, Rgb, RgbImage};
+use nalgebra::{Matrix4x1, SVector, SMatrix, Vector2, Vector3, Vector4, base};
+use image::{RgbImage, Rgb};
 use crate::shaders::IShader;
 
 const DEPTH: f32 = 255.;
@@ -43,17 +43,18 @@ pub fn v2m(v: SVector<f32, 3>) -> SMatrix<f32, 4, 1> {
     return m;
 }
 
-pub fn m2v(m: SMatrix<f32, 4, 1>) -> SVector<f32, 3> {
-    let v = Vector3::new(
+pub fn m2v(m: SMatrix<f32, 4, 1>) -> SVector<f32, 4> {
+    let v = Vector4::new(
         (m[(0, 0)] / m[(3, 0)]).floor(),
         (m[(1, 0)] / m[(3, 0)]).floor(),
         (m[(2, 0)] / m[(3, 0)]).floor(),
+        (m[(3, 0)] / m[(3, 0)]).floor(),
     );
     return v;
 }
 
 
-fn barycentric(pts: &Vec<SVector<f32, 3>>, p: SVector<f32, 3>) -> SVector<f32, 3> {
+fn barycentric(pts: &Vec<SVector<f32, 4>>, p: SVector<f32, 3>) -> SVector<f32, 3> {
     let v1: SVector<f32, 3> = Vector3::new(
         pts[2][0] - pts[0][0],
         pts[1][0] - pts[0][0],
@@ -75,13 +76,13 @@ fn barycentric(pts: &Vec<SVector<f32, 3>>, p: SVector<f32, 3>) -> SVector<f32, 3
 }
 
 pub fn triangle(
-    pts: Vec<SVector<f32, 3>>,
-    shader: Box<dyn IShader>,
+    pts: Vec<SVector<f32, 4>>,
+    shader: &Box<dyn IShader>,
     zbuffer: &mut Vec<f32>,
     image: &mut RgbImage,
+    color: Rgb<u8>
 ) {
     let (imwidth, imheight) = (image.width() as f32, image.height() as f32);
-    let (texwidth, texheight) = (texture.width() as f32, texture.height() as f32);
 
     let mut bboxmin: SVector<f32, 2> = Vector2::new(std::f32::MAX, std::f32::MAX);
     let mut bboxmax: SVector<f32, 2> = Vector2::new(-std::f32::MAX, -std::f32::MAX);
@@ -95,44 +96,29 @@ pub fn triangle(
     }
 
     let mut p: SVector<f32, 3> = Vector3::new(bboxmin.x, bboxmin.y, 0.);
-    let mut texture_coords: SVector<f32, 3>;
-    let mut pixel_color: Rgb<u8>;
 
     while p.x <= bboxmax.x {
         p.y = bboxmin.y;
         while p.y <= bboxmax.y {
-            let bc_screen = barycentric(&pts, p);
-            if bc_screen.x < 0. || bc_screen.y < 0. || bc_screen.z < 0. {
+            let bc_screen: SVector<f32, 3> = barycentric(&pts, p);
+
+            p.z = pts[0][2] * bc_screen.x + pts[1][2] * bc_screen.y + pts[2][2] * bc_screen.z;
+            let w: f32 = pts[0][3]*bc_screen.x + pts[1][3]*bc_screen.y + pts[2][3]*bc_screen.z;
+
+            let frag_depth: f32 = f32::max(0., f32::min(255., p.z / w + 0.5));
+
+            if bc_screen.x < 0. || bc_screen.y < 0. || bc_screen.z < 0. || zbuffer[(p.x + p.y * imwidth) as usize] > frag_depth {
                 p.y += 1.;
                 continue;
             }
 
-            p.z = 0.;
-            for i in 0..3 {
-                p.z += pts[i][2] * bc_screen[i];
+            let (discard, color) = shader.fragment(bc_screen, color);
+
+            if !discard {
+                zbuffer[(p.x + p.y * imwidth) as usize] = frag_depth;
+                image.put_pixel(p.x as u32, p.y as u32, color);
             }
 
-            if zbuffer[(p.x + p.y * imwidth) as usize] < p.z {
-                zbuffer[(p.x + p.y * imwidth) as usize] = p.z;
-
-                texture_coords = vertices_texture_coords[0] * bc_screen.x
-                    + vertices_texture_coords[1] * bc_screen.y
-                    + vertices_texture_coords[2] * bc_screen.z;
-
-                pixel_color = texture
-                    .get_pixel(
-                        (texture_coords[0] * texwidth) as u32,
-                        ((1. - texture_coords[1]) * texheight) as u32,
-                    )
-                    .to_rgb();
-                pixel_color = Rgb([
-                    ((pixel_color.0[0] as f32) * intensity) as u8,
-                    ((pixel_color.0[1] as f32) * intensity) as u8,
-                    ((pixel_color.0[2] as f32) * intensity) as u8,
-                ]);
-
-                image.put_pixel(p.x as u32, p.y as u32, pixel_color)
-            }
             p.y += 1.;
         }
         p.x += 1.;

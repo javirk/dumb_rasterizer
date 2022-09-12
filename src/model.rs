@@ -36,7 +36,7 @@ impl Model {
             verts_diffuse: Vec::new(),
             verts_normal: Vec::new(),
             diffuse_map: diffuse_map,
-            normal_map: normal_map
+            normal_map: normal_map,
         };
 
         let buf_reader = BufReader::new(file);
@@ -65,7 +65,7 @@ impl Model {
         let mut vector = Vec::new();
         let line_vec = trim_whitespace(line);
         for value in line_vec {
-            match value == "v" || value == "vt" {
+            match value == "v" || value == "vt" || value == "vn" {
                 false => vector.push(value.parse::<f32>().unwrap()),
                 true => ()
             }
@@ -77,31 +77,36 @@ impl Model {
     }
 
     fn add_face_from_line(&mut self, face_line: &str) {
-        let mut face = Vec::new();
-        let mut face_texture = Vec::new();
+        let mut face: Vec<i32> = Vec::new();
+        let mut face_texture: Vec<i32> = Vec::new();
+        let mut face_normal: Vec<i32> = Vec::new();
         let mut vertex_info: Vec<&str>;
         let mut vertex_num: i32;
         let mut texture_num: i32;
+        let mut normal_num: i32;
         for value in face_line.split(" ") {
             match value == "f" {
                 false => {
                     vertex_info = value.split("/").collect();
                     vertex_num = (vertex_info[0].parse::<i32>().unwrap()) - 1;
                     texture_num = (vertex_info[1].parse::<i32>().unwrap()) - 1;
+                    normal_num = (vertex_info[2].parse::<i32>().unwrap()) - 1;
                     face.push(vertex_num);
                     face_texture.push(texture_num);
+                    face_normal.push(normal_num);
                 },
                 true => ()
             }
         }
         self.faces.push(face);
         self.faces_diffuse_coords.push(face_texture);
+        self.faces_normal_coords.push(face_normal);
         self.nfaces += 1;  // I don't know if I like this here, it's maybe too many memory access
     }
 
     pub fn normal(&self, iface: usize, nthvert: usize) -> SVector<f32, 3> {
         let idx: i32 = self.faces_normal_coords[iface][nthvert];
-        return self.verts_normal[idx as usize]
+        return -self.verts_normal[idx as usize]
     }
 
     pub fn diffuse(&self, uvw: SVector<f32, 3>) -> Rgb<u8> {

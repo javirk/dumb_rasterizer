@@ -1,17 +1,20 @@
-use image::{imageops, RgbImage, ImageBuffer};
+use image::{imageops, RgbImage, Rgb};
 mod my_gl;
 mod model;
 mod rgb;
 mod shaders;
+use my_gl::triangle;
 use nalgebra::{SVector, SMatrix, Vector3};
+use shaders::IShader;
 
 const WIDTH: f32 = 800.0;
 const HEIGHT: f32 = 800.;
 
-const light_dir: SVector<f32, 3> = Vector3::new(0., 0., -1.);
-const eye: SVector<f32, 3> = Vector3::new(1., 1., 3.);
-const center: SVector<f32, 3> = Vector3::new(0., 0., 0.);
-const up: SVector<f32, 3> = Vector3::new(0., 1., 0.);
+const LIGHT_DIR: SVector<f32, 3> = Vector3::new(0., 0., -1.);
+const EYE: SVector<f32, 3> = Vector3::new(1., 1., 3.);
+const CENTER: SVector<f32, 3> = Vector3::new(0., 0., 0.);
+const UP: SVector<f32, 3> = Vector3::new(0., 1., 0.);
+const BASE_COLOR: Rgb<u8> = Rgb([255 as u8, 155 as u8, 0 as u8]);
 
 
 fn main() {
@@ -31,54 +34,19 @@ fn main() {
         }
     };
 
-    // Declare variables to use later
-    let mut face: &Vec<i32>;
-    let mut face_texture: &Vec<i32>;
-    let mut intensity: f32;
-    let mut v: SVector<f32, 3>;
-    let mut n: SVector<f32, 3>;
-    let mut t: SVector<f32, 3>;
-
-    let modelview: SMatrix<f32, 4, 4> = my_gl::lookat(eye, center, up);
-    let projection: SMatrix<f32, 4, 4> = my_gl::projection(-1. / (eye - center).z);
+    let modelview: SMatrix<f32, 4, 4> = my_gl::lookat(EYE, CENTER, UP);
+    let projection: SMatrix<f32, 4, 4> = my_gl::projection(-1. / (EYE - CENTER).z);
     let viewport: SMatrix<f32, 4, 4> = my_gl::viewport(WIDTH / 8., HEIGHT / 8., WIDTH * 3./4., HEIGHT* 3./4.);
 
-    // Render
+    let mut shader: Box<dyn IShader> = Box::new(shaders::CartoonShader::init());
+    let transformation: SMatrix<f32, 4, 4> = viewport * projection * modelview;
+
     for i in 0..model.nfaces as usize {
-        face_texture = &model.faces_diffuse_coords[i];
-        face = &model.faces[i];
-
-        let mut screen_coords: Vec<SVector<f32, 3>> = Vec::new(); // Is it bad to use let inside a for loop? @TODO: Investigate
-        //let mut world_coords: Vec<SVector<f32, 3>> = Vec::new();
-        let mut texture_coords: Vec<SVector<f32, 3>> = Vec::new();
-        let shader: shaders::GouraudShader = shaders::IShader::init();
-
+        let mut screen_coords: Vec<SVector<f32, 4>> = Vec::new(); // Is it bad to use let inside a for loop? @TODO: Investigate
         for j in 0..3 as usize {
-            v = model.verts[face[j] as usize];
-            t = model.verts_diffuse[face_texture[j] as usize];
-
-            texture_coords.push(t);
-            screen_coords.push(
-                my_gl::m2v(viewport * projection * modelview * my_gl::v2m(v))
-            );
-            //world_coords.push(v);
+            screen_coords.push(shader.vertex(&model, LIGHT_DIR, transformation, i, j));
         }
-
-        //n = (world_coords[2] - world_coords[0]).cross(&(world_coords[1] - world_coords[0]));
-        //n = n.normalize();
-
-        intensity = n.dot(&light_dir);
-
-        if intensity > 0. {
-            my_gl::triangle(
-                screen_coords,
-                &mut zbuffer,
-                &mut imgbuf,
-                &texture_map,
-                texture_coords,
-                intensity,
-            );
-        }
+        triangle(screen_coords, &shader, &mut zbuffer, &mut imgbuf, BASE_COLOR);
     }
 
     imgbuf = imageops::flip_vertical(&imgbuf);
