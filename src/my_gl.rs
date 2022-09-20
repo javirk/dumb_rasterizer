@@ -1,6 +1,7 @@
-use nalgebra::{Matrix4x1, SVector, SMatrix, Vector2, Vector3, Vector4, base};
+use nalgebra::{Matrix4x1, SVector, SMatrix, Vector2, Vector3, Vector4, base, DVector};
 use image::{RgbImage, Rgb};
-use crate::shaders::IShader;
+use crate::model::Model;
+use crate::shaders::AnyShader;
 
 const DEPTH: f32 = 255.;
 
@@ -45,12 +46,31 @@ pub fn v2m(v: SVector<f32, 3>) -> SMatrix<f32, 4, 1> {
 
 pub fn m2v(m: SMatrix<f32, 4, 1>) -> SVector<f32, 4> {
     let v = Vector4::new(
+        m[(0, 0)] / m[(3, 0)],
+        m[(1, 0)] / m[(3, 0)],
+        m[(2, 0)] / m[(3, 0)],
+        m[(3, 0)] / m[(3, 0)],
+    );
+    return v;
+}
+
+pub fn m2v_floor(m: SMatrix<f32, 4, 1>) -> SVector<f32, 4> {
+    let v = Vector4::new(
         (m[(0, 0)] / m[(3, 0)]).floor(),
         (m[(1, 0)] / m[(3, 0)]).floor(),
         (m[(2, 0)] / m[(3, 0)]).floor(),
         (m[(3, 0)] / m[(3, 0)]).floor(),
     );
     return v;
+}
+
+pub fn proj4_3(v: SVector<f32, 4>) -> SVector<f32, 3> {
+    // TODO: Make this function general for any input and output sizes
+    Vector3::new(
+        v[(0)],
+        v[(1)],
+        v[(2)]
+    )
 }
 
 
@@ -77,7 +97,8 @@ fn barycentric(pts: &Vec<SVector<f32, 4>>, p: SVector<f32, 3>) -> SVector<f32, 3
 
 pub fn triangle(
     pts: Vec<SVector<f32, 4>>,
-    shader: &Box<dyn IShader>,
+    model: &Model,
+    shader: &AnyShader,
     zbuffer: &mut Vec<f32>,
     image: &mut RgbImage,
     color: Rgb<u8>
@@ -112,7 +133,7 @@ pub fn triangle(
                 continue;
             }
 
-            let (discard, color) = shader.fragment(bc_screen, color);
+            let (discard, color) = shader.fragment(model, bc_screen, color);
 
             if !discard {
                 zbuffer[(p.x + p.y * imwidth) as usize] = frag_depth;

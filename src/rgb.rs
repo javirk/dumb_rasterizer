@@ -75,4 +75,3 @@ impl<T: Sub<Output = T> + Copy> Sub<T> for RgbExt<T> {
         self
     }
 }
-

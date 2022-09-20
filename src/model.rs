@@ -14,17 +14,19 @@ pub struct Model {
     pub faces_diffuse_coords: Vec<Vec<i32>>,
     pub faces_normal_coords: Vec<Vec<i32>>,
     pub verts: Vec<SVector<f32, 3>>,
-    pub verts_diffuse: Vec<SVector<f32, 3>>,
-    pub verts_normal: Vec<SVector<f32, 3>>,
+    pub uv_: Vec<SVector<f32, 3>>,
+    pub norms: Vec<SVector<f32, 3>>,
     pub diffuse_map: ImageBuffer<image::Rgb<u8>, Vec<u8>>,
-    pub normal_map: ImageBuffer<image::Rgb<u8>, Vec<u8>>
+    pub normal_map: ImageBuffer<image::Rgb<u8>, Vec<u8>>,
+    pub specular_map: ImageBuffer<image::Rgb<u8>, Vec<u8>>
 }
 
 impl Model {
-    pub fn from_file(obj_file: &str, diffuse_file: &str, normal_file: &str) -> Result<Self> {
+    pub fn from_file(obj_file: &str, diffuse_file: &str, normal_file: &str, specular_file: &str) -> Result<Self> {
         let file = File::open(obj_file)?;//.expect("file not found!");
         let diffuse_map = image::open(diffuse_file).unwrap().to_rgb8();
         let normal_map = image::open(normal_file).unwrap().to_rgb8();
+        let specular_map = image::open(specular_file).unwrap().to_rgb8();
 
         let mut model = Model {
             nfaces: 0,
@@ -33,10 +35,11 @@ impl Model {
             faces_diffuse_coords: Vec::new(),
             faces_normal_coords: Vec::new(),
             verts: Vec::new(),
-            verts_diffuse: Vec::new(),
-            verts_normal: Vec::new(),
+            uv_: Vec::new(),
+            norms: Vec::new(),
             diffuse_map: diffuse_map,
             normal_map: normal_map,
+            specular_map: specular_map
         };
 
         let buf_reader = BufReader::new(file);
@@ -49,8 +52,8 @@ impl Model {
             match &l[..2] {
                 "v " => Model::add_line_float_vector(&mut model.verts, &l),
                 "f " => Model::add_face_from_line(&mut model, &l),
-                "vt" => Model::add_line_float_vector(&mut model.verts_diffuse, &l),
-                "vn" => Model::add_line_float_vector(&mut model.verts_normal, &l),
+                "vt" => Model::add_line_float_vector(&mut model.uv_, &l),
+                "vn" => Model::add_line_float_vector(&mut model.norms, &l),
                 _ => (),
             }
         }
@@ -101,12 +104,29 @@ impl Model {
         self.faces.push(face);
         self.faces_diffuse_coords.push(face_texture);
         self.faces_normal_coords.push(face_normal);
-        self.nfaces += 1;  // I don't know if I like this here, it's maybe too many memory access
+        self.nfaces += 1;
     }
 
-    pub fn normal(&self, iface: usize, nthvert: usize) -> SVector<f32, 3> {
+    pub fn uv_normal(&self, iface: usize, nthvert: usize) -> SVector<f32, 3> {
+        // Normals should be taken from the normal map, just like the diffuse
         let idx: i32 = self.faces_normal_coords[iface][nthvert];
-        return -self.verts_normal[idx as usize]
+        return self.norms[idx as usize]
+    }
+
+    pub fn normal(&self, uvw: SVector<f32, 3>) -> SVector<f32, 3> {
+        let c = self.normal_map
+            .get_pixel(
+                (uvw[0] * (self.normal_map.width() as f32)) as u32,
+                ((1. - uvw[1]) * (self.normal_map.height() as f32)) as u32,
+            )
+            .to_rgb().0;
+        
+        let n: SVector<f32, 3> = Vector3::new(
+            c[2] as f32/255.*2. - 1.,
+            c[1] as f32/255.*2. - 1.,
+            c[0] as f32/255.*2. - 1.,
+        );
+        return n;
     }
 
     pub fn diffuse(&self, uvw: SVector<f32, 3>) -> Rgb<u8> {
@@ -118,6 +138,21 @@ impl Model {
             )
             .to_rgb();
         return pixel_color;
+    }
+
+    pub fn specular(&self, uvw: SVector<f32, 3>) -> f32 {
+        let s: u8 = self.specular_map
+            .get_pixel(
+                (uvw[0] * (self.specular_map.width() as f32)) as u32,
+                ((1. - uvw[1]) * (self.specular_map.height() as f32)) as u32,
+            )
+            .to_rgb().0[0];
+        
+        return s as f32;
+    }
+
+    pub fn uv(&self, iface: usize, nthvert: usize) -> SVector<f32, 3> {
+        return self.uv_[self.faces_diffuse_coords[iface][nthvert] as usize]
     }
 }
 
